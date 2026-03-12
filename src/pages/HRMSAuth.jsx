@@ -191,7 +191,7 @@ function LoginForm({ role, cfg, dark, onSuccess }) {
   };
 
   return (
-    <div className="flex flex-col gap-5">
+    <form onSubmit={e => { e.preventDefault(); handle(); }} className="flex flex-col gap-5">
       <Field
         label={idField.label}
         icon={idField.icon}
@@ -219,7 +219,7 @@ function LoginForm({ role, cfg, dark, onSuccess }) {
         </a>
       </div>
 
-      <button onClick={handle} disabled={loading}
+      <button type="submit" disabled={loading}
         className={`w-full py-3 rounded-xl text-sm font-bold text-white shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 ${cfg.btn} ${loading ? "opacity-70 cursor-not-allowed" : ""}`}>
         {loading
           ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Signing in…</>
@@ -233,7 +233,7 @@ function LoginForm({ role, cfg, dark, onSuccess }) {
 
       <div className="grid grid-cols-2 gap-3">
         {["Google", "Microsoft"].map(p => (
-          <button key={p}
+          <button key={p} type="button"
             className={`flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-medium transition-all
               ${dark
                 ? "bg-slate-800/40 border-slate-700/60 text-slate-400 hover:bg-slate-700/50 hover:text-slate-200"
@@ -243,9 +243,10 @@ function LoginForm({ role, cfg, dark, onSuccess }) {
           </button>
         ))}
       </div>
-    </div>
+    </form>
   );
 }
+
 
 // ─── Signup Form ──────────────────────────────────────────────────────────────
 function SignupForm({ role, cfg, dark, onSuccess }) {
