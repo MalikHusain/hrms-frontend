@@ -12,17 +12,32 @@ import OfferLetters from "./pages/OfferLetters";
 import SettingsPage from "./pages/SettingsPage";
 import NotFound from "./pages/NotFound";
 import HRMSAuth from "./pages/HRMSAuth";
+import LeavesPage from "./pages/LeavesPage";
 
 const queryClient = new QueryClient();
 
 export default function App() {
-  const [isAuth, setIsAuth] = useState(
-    () => localStorage.getItem("hrms_auth") === "true"
-  );
+  // ✅ New
+  const [isAuth, setIsAuth] = useState(() => {
+    const token = localStorage.getItem("hrms_token");
+    if (!token) return false;
+
+    // Check token is not expired
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      if (payload.exp * 1000 < Date.now()) {
+        localStorage.clear(); // token expired, clear it
+        return false;
+      }
+      return true;
+    } catch {
+      localStorage.clear(); // invalid token, clear it
+      return false;
+    }
+  });
 
   const handleLogin = () => {
-    localStorage.setItem("hrms_auth", "true");
-    setIsAuth(true);
+    setIsAuth(true); // token is already saved by HRMSAuth.jsx
   };
 
   return (
@@ -59,6 +74,9 @@ export default function App() {
               isAuth ? <AppLayout><SettingsPage /></AppLayout> : <Navigate to="/login" replace />
             } />
 
+            <Route path="/leaves" element={
+              isAuth ? <AppLayout><LeavesPage /></AppLayout> : <Navigate to="/login" replace />
+            } />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

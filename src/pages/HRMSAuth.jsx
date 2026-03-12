@@ -115,7 +115,7 @@ function Field({ label, icon, type = "text", placeholder, value, onChange, extra
 }
 
 // ─── SelectField ──────────────────────────────────────────────────────────────
-function SelectField({ label, icon, options, ring, dark }) {
+function SelectField({ label, icon, options, value, onChange, ring, dark }) {
   return (
     <div className="flex flex-col gap-1.5">
       <label className={`text-xs font-semibold uppercase tracking-widest ${dark ? "text-slate-400" : "text-slate-500"}`}>
@@ -125,13 +125,16 @@ function SelectField({ label, icon, options, ring, dark }) {
         <span className={`absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none ${dark ? "text-slate-500" : "text-slate-400"}`}>
           <Icon d={icon} size={15} />
         </span>
-        <select className={`w-full border rounded-xl pl-10 pr-4 py-3 text-sm outline-none transition-all focus:ring-2 ${ring} appearance-none cursor-pointer
-          ${dark
-            ? "bg-slate-800/60 border-slate-700/60 text-slate-300"
-            : "bg-white border-slate-200 text-slate-700 shadow-sm"
-          }`}>
+        <select
+          value={value}
+          onChange={onChange}
+          className={`w-full border rounded-xl pl-10 pr-4 py-3 text-sm outline-none transition-all focus:ring-2 ${ring} appearance-none cursor-pointer
+            ${dark
+              ? "bg-slate-800/60 border-slate-700/60 text-slate-300"
+              : "bg-white border-slate-200 text-slate-700 shadow-sm"
+            }`}>
           <option value="" disabled>Select…</option>
-          {options.map(o => <option key={o}>{o}</option>)}
+          {options.map(o => <option key={o} value={o}>{o}</option>)}
         </select>
       </div>
     </div>
@@ -146,26 +149,69 @@ function LoginForm({ role, cfg, dark, onSuccess }) {
   const ring = dark ? cfg.ringDark : cfg.ringLight;
 
   const idField = {
-    employee:  { label: "Employee ID",   icon: icons.badge, placeholder: "EMP-0001" },
-    candidate: { label: "Email Address", icon: icons.mail,  placeholder: "you@email.com" },
-    hr:        { label: "HR Email",      icon: icons.user,  placeholder: "hr@company.com" },
+    employee:  { label: "Employee ID",   icon: icons.badge, placeholder: "EMP-0001",       type: "text"  },
+    candidate: { label: "Email Address", icon: icons.mail,  placeholder: "you@email.com",   type: "email" },
+    hr:        { label: "HR Email",      icon: icons.user,  placeholder: "hr@company.com",  type: "email" },
   }[role];
 
-  const handle = () => {
+  const handle = async () => {
     if (!id || !pw) return;
     setLoading(true);
-    setTimeout(() => {
+
+    try {
+      const body = role === "employee"
+        ? { employee_id: id, password: pw, role }
+        : { email: id, password: pw, role };
+
+      const res = await fetch("http://localhost:5000/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Login failed");
+        setLoading(false);
+        return;
+      }
+
+      localStorage.setItem("hrms_token", data.token);
+      localStorage.setItem("hrms_user", JSON.stringify(data.user));
+
       setLoading(false);
       onSuccess();
-    }, 1200);
+
+    } catch (err) {
+      console.error(err);
+      alert("Cannot connect to server. Is backend running?");
+      setLoading(false);
+    }
   };
 
   return (
     <div className="flex flex-col gap-5">
-      <Field label={idField.label} icon={idField.icon} placeholder={idField.placeholder}
-        value={id} onChange={e => setId(e.target.value)} ring={ring} dark={dark} />
-      <Field label="Password" icon={icons.lock} type="password" placeholder="••••••••"
-        value={pw} onChange={e => setPw(e.target.value)} ring={ring} dark={dark} />
+      <Field
+        label={idField.label}
+        icon={idField.icon}
+        type={idField.type}
+        placeholder={idField.placeholder}
+        value={id}
+        onChange={e => setId(e.target.value)}
+        ring={ring}
+        dark={dark}
+      />
+      <Field
+        label="Password"
+        icon={icons.lock}
+        type="password"
+        placeholder="••••••••"
+        value={pw}
+        onChange={e => setPw(e.target.value)}
+        ring={ring}
+        dark={dark}
+      />
 
       <div className="flex justify-end -mt-2">
         <a href="#" className={`text-xs transition-colors ${dark ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-700"}`}>
@@ -203,49 +249,145 @@ function LoginForm({ role, cfg, dark, onSuccess }) {
 
 // ─── Signup Form ──────────────────────────────────────────────────────────────
 function SignupForm({ role, cfg, dark, onSuccess }) {
-  const [pw, setPw] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [agreed, setAgreed] = useState(false);
-  const strength = getStrength(pw);
-  const ring = dark ? cfg.ringDark : cfg.ringLight;
+  // ── Controlled state for every field ──
+  const [firstName,  setFirstName]  = useState("");
+  const [lastName,   setLastName]   = useState("");
+  const [email,      setEmail]      = useState("");
+  const [phone,      setPhone]      = useState("");
+  const [pw,         setPw]         = useState("");
+  const [confirmPw,  setConfirmPw]  = useState("");
+  const [agreed,     setAgreed]     = useState(false);
+  const [loading,    setLoading]    = useState(false);
 
-  const handle = () => {
-    if (!agreed) return;
+  // Employee-specific
+  const [department, setDepartment] = useState("");
+  const [employeeId, setEmployeeId] = useState("");
+
+  // Candidate-specific
+  const [applyingFor,  setApplyingFor]  = useState("");
+  const [experience,   setExperience]   = useState("");
+
+  // HR-specific
+  const [hrRole,       setHrRole]       = useState("");
+  const [hrAccessCode, setHrAccessCode] = useState("");
+
+  const strength = getStrength(pw);
+  const ring     = dark ? cfg.ringDark : cfg.ringLight;
+
+  const handle = async () => {
+    // ── Basic validation ──
+    if (!firstName || !lastName || !email || !phone || !pw || !confirmPw) {
+      alert("Please fill in all required fields.");
+      return;
+    }
+    if (pw !== confirmPw) {
+      alert("Passwords do not match.");
+      return;
+    }
+    if (strength.score < 2) {
+      alert("Please choose a stronger password.");
+      return;
+    }
+    if (!agreed) {
+      alert("Please agree to the Terms of Service.");
+      return;
+    }
+
     setLoading(true);
-    setTimeout(() => { setLoading(false); onSuccess(); }, 1400);
+
+    try {
+      // Build payload based on role
+      const payload = {
+        first_name:  firstName,
+        last_name:   lastName,
+        email,
+        phone,
+        password:    pw,
+        role,                        // "employee" | "candidate" | "hr"
+      };
+
+      if (role === "employee") {
+        payload.department   = department;
+        payload.employee_id  = employeeId;
+      }
+      // candidate / hr extra fields are informational for now;
+      // extend your DB schema & register route to store them as needed.
+
+      const res = await fetch("http://localhost:5000/api/auth/register", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Registration failed");
+        setLoading(false);
+        return;
+      }
+
+      setLoading(false);
+      onSuccess();
+
+    } catch (err) {
+      console.error(err);
+      alert("Cannot connect to server. Is backend running?");
+      setLoading(false);
+    }
   };
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-4">
-        <Field label="First Name" icon={icons.user} placeholder="John" ring={ring} dark={dark} />
-        <Field label="Last Name"  icon={icons.user} placeholder="Doe"  ring={ring} dark={dark} />
-      </div>
-      <Field label="Email Address" icon={icons.mail} type="email" placeholder="you@company.com" ring={ring} dark={dark} />
-      <Field label="Phone" icon={icons.phone} placeholder="+91 00000 00000" ring={ring} dark={dark} />
 
+      {/* Name row */}
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="First Name" icon={icons.user}  placeholder="John" value={firstName} onChange={e => setFirstName(e.target.value)}  ring={ring} dark={dark} />
+        <Field label="Last Name"  icon={icons.user}  placeholder="Doe"  value={lastName}  onChange={e => setLastName(e.target.value)}   ring={ring} dark={dark} />
+      </div>
+
+      <Field label="Email Address" icon={icons.mail}  type="email" placeholder="you@company.com" value={email} onChange={e => setEmail(e.target.value)} ring={ring} dark={dark} />
+      <Field label="Phone"         icon={icons.phone}              placeholder="+91 00000 00000"  value={phone} onChange={e => setPhone(e.target.value)} ring={ring} dark={dark} />
+
+      {/* Role-specific fields */}
       {role === "employee" && (
         <div className="grid grid-cols-2 gap-4">
-          <SelectField label="Department" icon={icons.building}
-            options={["Engineering","Marketing","Finance","Operations","HR","Sales"]} ring={ring} dark={dark} />
-          <Field label="Employee ID" icon={icons.badge} placeholder="EMP-0001" ring={ring} dark={dark} />
+          <SelectField
+            label="Department" icon={icons.building}
+            options={["Engineering","Marketing","Finance","Operations","HR","Sales"]}
+            value={department} onChange={e => setDepartment(e.target.value)}
+            ring={ring} dark={dark}
+          />
+          <Field label="Employee ID" icon={icons.badge} placeholder="EMP-0001"
+            value={employeeId} onChange={e => setEmployeeId(e.target.value)} ring={ring} dark={dark} />
         </div>
       )}
+
       {role === "candidate" && (
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Applying For" icon={icons.briefcase} placeholder="Position / Role" ring={ring} dark={dark} />
+          <Field label="Applying For" icon={icons.briefcase} placeholder="Position / Role"
+            value={applyingFor} onChange={e => setApplyingFor(e.target.value)} ring={ring} dark={dark} />
           <SelectField label="Experience" icon={icons.key}
-            options={["Fresher","1–2 yrs","3–5 yrs","5–10 yrs","10+ yrs"]} ring={ring} dark={dark} />
+            options={["Fresher","1–2 yrs","3–5 yrs","5–10 yrs","10+ yrs"]}
+            value={experience} onChange={e => setExperience(e.target.value)}
+            ring={ring} dark={dark}
+          />
         </div>
       )}
+
       {role === "hr" && (
         <div className="grid grid-cols-2 gap-4">
           <SelectField label="HR Role" icon={icons.shield}
-            options={["HR Manager","HR Executive","Recruiter","Payroll Specialist","HR Admin"]} ring={ring} dark={dark} />
-          <Field label="HR Access Code" icon={icons.key} placeholder="HR-ADMIN-XXX" ring={ring} dark={dark} />
+            options={["HR Manager","HR Executive","Recruiter","Payroll Specialist","HR Admin"]}
+            value={hrRole} onChange={e => setHrRole(e.target.value)}
+            ring={ring} dark={dark}
+          />
+          <Field label="HR Access Code" icon={icons.key} placeholder="HR-ADMIN-XXX"
+            value={hrAccessCode} onChange={e => setHrAccessCode(e.target.value)} ring={ring} dark={dark} />
         </div>
       )}
 
+      {/* Password */}
       <Field label="Password" icon={icons.lock} type="password" placeholder="Create password"
         value={pw} onChange={e => setPw(e.target.value)} ring={ring} dark={dark}
         extra={pw && (
@@ -257,8 +399,16 @@ function SignupForm({ role, cfg, dark, onSuccess }) {
           </div>
         )}
       />
-      <Field label="Confirm Password" icon={icons.lock} type="password" placeholder="Repeat password" ring={ring} dark={dark} />
 
+      {/* Confirm Password */}
+      <Field label="Confirm Password" icon={icons.lock} type="password" placeholder="Repeat password"
+        value={confirmPw} onChange={e => setConfirmPw(e.target.value)} ring={ring} dark={dark}
+        extra={confirmPw && pw !== confirmPw && (
+          <p className="text-xs text-red-400 mt-1">Passwords do not match</p>
+        )}
+      />
+
+      {/* Terms */}
       <label className="flex items-start gap-3 cursor-pointer group">
         <div onClick={() => setAgreed(a => !a)}
           className={`mt-0.5 w-4 h-4 rounded flex-shrink-0 border transition-all flex items-center justify-center
@@ -274,6 +424,7 @@ function SignupForm({ role, cfg, dark, onSuccess }) {
         </span>
       </label>
 
+      {/* Submit */}
       <button onClick={handle} disabled={loading || !agreed}
         className={`w-full py-3 rounded-xl text-sm font-bold text-white shadow-lg transition-all active:scale-[0.98] flex items-center justify-center gap-2 ${cfg.btn} ${(loading || !agreed) ? "opacity-60 cursor-not-allowed" : ""}`}>
         {loading
@@ -305,16 +456,13 @@ function ThemeToggle({ dark, onToggle }) {
       className={`relative w-14 h-7 rounded-full border-2 transition-all duration-300 flex items-center
         ${dark ? "bg-slate-700 border-slate-600" : "bg-slate-100 border-slate-200"}`}
       title={dark ? "Switch to light mode" : "Switch to dark mode"}>
-      {/* Sliding thumb */}
       <span className={`absolute w-5 h-5 rounded-full shadow-md transition-all duration-300 flex items-center justify-center
         ${dark ? "translate-x-[30px] bg-slate-900" : "translate-x-[2px] bg-white"}`}>
         <Icon d={dark ? icons.moon : icons.sun} size={11} stroke={dark ? "#94a3b8" : "#f59e0b"} />
       </span>
-      {/* Sun icon on left of track */}
       <span className={`absolute left-1.5 transition-opacity duration-200 ${dark ? "opacity-0" : "opacity-50"}`}>
         <Icon d={icons.sun} size={10} stroke="#f59e0b" />
       </span>
-      {/* Moon icon on right of track */}
       <span className={`absolute right-1.5 transition-opacity duration-200 ${dark ? "opacity-50" : "opacity-0"}`}>
         <Icon d={icons.moon} size={10} stroke="#94a3b8" />
       </span>
@@ -338,15 +486,17 @@ export default function HRMSAuth({ onLogin }) {
 
   const handleLoginSuccess  = () => {
     showToast(`Welcome back! Redirecting to ${cfg.label} dashboard…`);
-    if (onLogin) onLogin(); // ← triggers App state update → redirect
+    if (onLogin) onLogin();
   };
-  const handleSignupSuccess = () => showToast(`Account created! ${role === "hr" ? "Awaiting admin approval." : "You can now sign in."}`);
+  const handleSignupSuccess = () => {
+    showToast(`Account created! ${role === "hr" ? "Awaiting admin approval." : "You can now sign in."}`);
+    setTab("login"); // ← auto-switch to login after registration
+  };
 
-  // Theme tokens
-  const bg             = dark ? "bg-slate-950 text-slate-100"          : "bg-slate-50 text-slate-900";
-  const card           = dark ? "bg-slate-900/80 border-slate-700/50"  : "bg-white border-slate-200";
-  const tabBg          = dark ? "bg-slate-800/60"                       : "bg-slate-100";
-  const tabInactive    = dark ? "text-slate-400 hover:text-slate-200"  : "text-slate-500 hover:text-slate-700";
+  const bg              = dark ? "bg-slate-950 text-slate-100"          : "bg-slate-50 text-slate-900";
+  const card            = dark ? "bg-slate-900/80 border-slate-700/50"  : "bg-white border-slate-200";
+  const tabBg           = dark ? "bg-slate-800/60"                       : "bg-slate-100";
+  const tabInactive     = dark ? "text-slate-400 hover:text-slate-200"  : "text-slate-500 hover:text-slate-700";
   const roleBtnInactive = dark
     ? "border-slate-700/60 text-slate-400 bg-slate-800/40 hover:border-slate-600 hover:text-slate-200"
     : "border-slate-200 text-slate-500 bg-white hover:border-slate-300 hover:text-slate-700 shadow-sm";
@@ -363,7 +513,7 @@ export default function HRMSAuth({ onLogin }) {
           backgroundSize: "48px 48px"
         }} />
 
-      {/* Glow orbs — dark mode only */}
+      {/* Glow orbs */}
       {dark && <>
         <div className="fixed top-0 left-0 w-[600px] h-[400px] rounded-full blur-[120px] opacity-10 pointer-events-none"
           style={{ background: cfg.accent, transition: "background 0.4s" }} />
@@ -373,7 +523,7 @@ export default function HRMSAuth({ onLogin }) {
 
       {toast && <Toast msg={toast} onClose={() => setToast(null)} dark={dark} />}
 
-      {/* ── Theme Toggle (top-right) ── */}
+      {/* Theme Toggle */}
       <div className="fixed top-5 right-5 z-20 flex items-center gap-2.5">
         <span className={`text-xs font-medium select-none ${dark ? "text-slate-500" : "text-slate-400"}`}>
           {dark ? "Dark" : "Light"}
@@ -456,7 +606,7 @@ export default function HRMSAuth({ onLogin }) {
           {/* Forms */}
           <div key={`${role}-${tab}-${dark}`} className="animate-[fadeSlide_.25s_ease]">
             {tab === "login"
-              ? <LoginForm  role={role} cfg={cfg} dark={dark} onSuccess={handleLoginSuccess} />
+              ? <LoginForm  role={role} cfg={cfg} dark={dark} onSuccess={handleLoginSuccess}  />
               : <SignupForm role={role} cfg={cfg} dark={dark} onSuccess={handleSignupSuccess} />
             }
           </div>
